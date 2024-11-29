@@ -1,0 +1,346 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-11-29"
+---
+
+
+```{r}
+strain_data <- readRDS("Output_train_test/train_data_run1.rds") 
+stest_data <- readRDS("Output_train_test/test_data_run1.rds")
+#thresholds <- readRDS("Output_train_test/non_analogue_thresholds.rds")
+
+#stest_data[["12"]] 
+
+#strain_data[["12"]]
+
+
+#all <- full_join(dplyr::select(stest_data[["12"]], -Value),
+                 #dplyr::select(strain_data[["12"]], -zone), 
+                # by = "name") |>
+ # filter(!is.na(percent)) |> #delete na value in testing data.
+ # filter(!is.na(mean_taxa_high)) #delete na value in training data.
+
+#all_meta <- all |> 
+  #dplyr::select(ID, class_12km, zone) |> distinct()
+```
+
+
+```{r}
+# Ensure that both lists (stest_data and strain_data) have the same names
+all_results <- map(names(stest_data), ~ {
+  # Select the corresponding dataframe from both lists
+  stest_df <- stest_data[[.]]
+  strain_df <- strain_data[[.]]
+  
+  # Perform the full_join and filtering
+  all <- full_join(
+    dplyr::select(stest_df, -Value),
+    dplyr::select(strain_df, -zone),
+    by = "name"
+  ) %>%
+    filter(!is.na(percent)) %>%  # Delete NA values in testing data
+    filter(!is.na(mean_taxa_high))  # Delete NA values in training data
+  
+  # Create the 'all_meta' dataframe
+  all_meta <- all %>%
+    dplyr::select(ID, class_12km, zone) %>%
+    distinct()
+  
+  # Return a list of the two dataframes, with the zone as the name
+  list(all = all, all_meta = all_meta)
+})
+
+# Ensure that the output has the same names as the zones in the original data
+names(all_results) <- names(stest_data)  # Ensures keys match zone names
+
+# Save the results as separate lists for "all" and "all_meta"
+all_list <- map(all_results, "all")
+all_meta_list <- map(all_results, "all_meta")
+
+# Check if the results exist for zone "12"
+all_list[["12"]]  # Access "all" for zone 12
+all_meta_list[["12"]]
+
+```
+
+```{r}
+#sobs_biome <- all_list[["12"]]  %>% 
+  #filter(!is.na(i)) %>%
+#  dplyr::select(ID, zone, class_12km) %>%
+  #distinct() %>%
+  #group_by(id_entity) %>% 
+  #count(pnv) %>%
+  #slice(which.max(n)) %>%
+  #rename(observed_biome = pnv) %>%
+  #ungroup() %>%
+  #dplyr::select(id_entity, observed_biome)
+```
+
+
+```{r}
+EpsVal<- 0.5
+dis_index <- all_list[["12"]]  %>%
+  mutate(Epsilon = EpsVal) %>%
+  mutate(HIGH_Sqrt=(percent-mean_taxa_high)^2/((sd_taxa_high+Epsilon)^2)) %>%
+  mutate(LOW_Sqrt=(percent-mean_taxa_low)^2/((sd_taxa_low+Epsilon)^2)) %>%
+  dplyr::select(ID,class_12km,zone, name, HIGH_Sqrt, LOW_Sqrt) %>%
+  group_by(ID) %>%
+  summarise(across(c(HIGH_Sqrt, LOW_Sqrt), sum )) %>% 
+  mutate(across(c(HIGH_Sqrt, LOW_Sqrt), sqrt)) %>% 
+  ungroup()
+```
+
+
+```{r}
+EpsVal <- 0.5
+
+# Apply the task to each dataframe in all_list
+dis_index_list <- map(all_list, ~ {
+  .x %>%
+    mutate(Epsilon = EpsVal) %>%
+    mutate(HIGH_Sqrt = (percent - mean_taxa_high)^2 / ((sd_taxa_high + Epsilon)^2)) %>%
+    mutate(LOW_Sqrt = (percent - mean_taxa_low)^2 / ((sd_taxa_low + Epsilon)^2)) %>%
+    dplyr::select(ID, class_12km, zone, name, HIGH_Sqrt, LOW_Sqrt) %>%
+    group_by(ID) %>%
+    summarise(across(c(HIGH_Sqrt, LOW_Sqrt), sum)) %>%
+    mutate(across(c(HIGH_Sqrt, LOW_Sqrt), sqrt)) %>%
+    ungroup()
+})
+
+# Access dis_index for zone "12"
+dis_index_list[["12"]]  # For example, for zone 12
+
+```
+
+```{r}
+dis_index_list[["12"]] 
+
+simi_index <- dis_index_list[["12"]]  %>% 
+  mutate(HIGH=exp(-HIGH_Sqrt/100)) %>% 
+  mutate(LOW=exp(-LOW_Sqrt/100)) %>% 
+  dplyr::select(ID,HIGH,LOW)
+```
+
+
+```{r}
+# Apply the transformation to each dataframe in dis_index_list
+simi_index_list <- map(dis_index_list, ~ .x %>%
+  mutate(high = exp(-HIGH_Sqrt / 100)) %>%
+  mutate(low = exp(-LOW_Sqrt / 100)) %>%
+  dplyr::select(ID, high, low))
+```
+
+
+
+```{r}
+sqsc <- simi_index_list[["12"]] %>% 
+  pivot_longer(cols = -(ID), names_to = "predicted_class") %>%
+  group_by(ID) %>%
+  slice_max(value) |>
+  ungroup() 
+```
+
+
+
+```{r}
+# Apply the transformation to each dataframe in simi_index_list
+sqsc_list <- map(simi_index_list, ~ .x %>%
+  pivot_longer(cols = -(ID), names_to = "predicted_class") %>%
+  group_by(ID) %>%
+  slice_max(value) %>%
+  ungroup())
+```
+
+
+
+```{r}
+#get the most common biome in entities in duplicates
+pred_biome <- all_meta_list[["12"]] |>
+  inner_join(sqsc_list[["12"]]) |>
+  dplyr::select(-value)
+```
+
+
+```{r}
+# Apply the join to each dataframe in sqsc_list and all_meta_list
+pred_biome_list <- map2(all_meta_list, sqsc_list, ~ 
+  .x %>%
+  inner_join(.y, by = "ID") %>%  # Assuming both dataframes have "ID" as a common column
+  dplyr::select(-value)
+)
+```
+
+
+
+```{r}
+#make a comparison
+comparison_2 <- pred_biome_list[["12"]] 
+
+zona <- unique(pred_biome_list[["12"]]$zone)
+  
+##condusion matrix，转化为有序因子，按指定的顺序进行排列
+observed_2<-ordered(comparison_2$class_12km,levels=c('high','low'))
+
+predicted_2 <-ordered(comparison_2$predicted_class,levels=c('high','low'))
+
+library(MLmetrics)
+zatab2<-ConfusionMatrix(y_true=observed_2,  y_pred=predicted_2 )
+#x-axis is true value and y-axis is the predicted value
+zatab2
+write.csv(zatab2,paste0("Output_data/matrix_entities_",zona,sep=""))
+
+#table in percentage
+rzatab2<-round(prop.table(zatab2,1)*100) #means calucltes the precentage based on row.
+rzatab2
+#write.csv(rzatab2,"Output/comparison_matrices_run3/cm_percentages.csv")
+```
+
+```{r}
+# Directory for saving outputs
+output_dir <- "Output_data"
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Process each dataframe in pred_biome_list
+comparison_results <- imap(pred_biome_list, ~ {
+  zona <- unique(.x$zone)
+  
+  # Create ordered factors
+  observed <- ordered(.x$class_12km, levels = c('high', 'low'))
+  predicted <- ordered(.x$predicted_class, levels = c('high', 'low'))
+  
+  # Generate confusion matrix
+  confusion_matrix <- ConfusionMatrix(y_true = observed, y_pred = predicted)
+  
+  # Save confusion matrix
+  write.csv(
+    confusion_matrix, 
+    file = paste0(output_dir, "/matrix_entities_", zona, ".csv"), 
+    row.names = TRUE
+  )
+  
+  # Calculate percentage table
+  percentage_table <- round(prop.table(confusion_matrix, 1) * 100)
+  
+  # Save percentage table
+  write.csv(
+    percentage_table, 
+    file = paste0(output_dir, "/cm_percentages_", zona, ".csv"), 
+    row.names = TRUE
+  )
+  
+  # Return results as a list
+  list(confusion_matrix = confusion_matrix, percentage_table = percentage_table)
+})
+
+```
+
+
+
+
+```{r}
+comparison_2 <- pred_biome_list[["12"]]
+
+zona <- unique(pred_biome_list[["12"]]$zone)
+#change the charactors to factors
+comparison_2$predicted_class <-as.factor(comparison_2$predicted_class)
+
+comparison_2$class_12km <- as.factor(comparison_2$class_12km)
+
+#Calculation of accuracy
+library(mlr3measures)
+acc <- acc(comparison_2$class_12km, comparison_2$predicted_class) 
+
+#Calculation of balanced accuracy for a multiclass categorization (Average of recalls)
+bacc <- bacc(comparison_2$class_12km, comparison_2$predicted_class) 
+
+#create a metric
+metrics <- data.frame(Accuracy=(acc*100),
+                      Balanced_accuracy=(bacc*100)) |>
+  mutate(zone = zona)
+  
+
+metrics
+```
+
+
+
+```{r}
+# Process each dataframe in pred_biome_list
+metrics_list <- map_dfr(pred_biome_list, ~ {
+  zona <- unique(.x$zone)
+  
+  # Convert to factors
+  .x <- .x %>%
+    mutate(
+      predicted_class = as.factor(predicted_class),
+      class_12km = as.factor(class_12km)
+    )
+  
+  # Calculate metrics
+  acc_value <- acc(.x$class_12km, .x$predicted_class)
+  bacc_value <- bacc(.x$class_12km, .x$predicted_class)
+  
+  # Create metrics dataframe
+  data.frame(
+    Accuracy = acc_value * 100,
+    Balanced_accuracy = bacc_value * 100,
+    zone = zona
+  )
+}, .id = "zone_id")
+
+metrics_list
+```
+
+```{r}
+# Compute averages for Accuracy and Balanced_accuracy
+average_row <- metrics_list %>%
+  summarise(
+    Accuracy = mean(Accuracy, na.rm = TRUE),
+    Balanced_accuracy = mean(Balanced_accuracy, na.rm = TRUE),
+    zone = "Average",      # Label the zone column for this row
+    zone_id = "Average"    # Label the zone_id column for this row
+  )
+
+# Add the average row to metrics_list
+metrics_list <- bind_rows(metrics_list, average_row)
+
+# View the updated metrics_list
+metrics_list
+
+write.csv(metrics_list, "Output_data/metrics_final.csv")
+```
+
+
+
+```{r}
+comparison_2 <- pred_biome_list |>
+  bind_rows()
+
+
+plot_map1 <- ggplot() +
+  ggplot2::geom_sf(data = latam_polygon, fill="gray95") + 
+  geom_point(data=left_join( comparison_2, pmp_usage_meta),aes(x=longitude, y=latitude, fill=predicted_class, colour=predicted_class)) +
+  scale_fill_manual(values = c(low="#d11141", high = "gray50")) +
+  scale_colour_manual(values = c(low="#d11141", high = "gray50")) +
+  labs(title = "Predicted, testing dataset") +
+  theme_test()
+  
+plot_map1
+
+plot_map2 <- ggplot() +
+  ggplot2::geom_sf(data = latam_polygon, fill="gray95") + 
+  geom_point(data=  pmp_usage_meta, aes(x=longitude, y=latitude, fill=class_12km, colour=class_12km) ) +
+  scale_fill_manual(values = c(low="#d11141", high = "gray50")) +
+  scale_colour_manual(values = c(low="#d11141", high = "gray50")) +
+  labs(title = "Observed, entire dataset") +
+  theme_test()
+
+plot_map2
+
+
+```
+
+
+
+
