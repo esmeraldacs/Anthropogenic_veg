@@ -101,6 +101,8 @@ pmp_meta_zone <- pmp_meta_sf %>%
 ggplot2::ggplot() + 
   ggplot2::geom_sf(data = latam_polygon) + 
   geom_point(data=pmp_meta_zone, aes(x=longitude, y=latitude, fill=Value, colour=Value)) +
+  jcolors::scale_color_jcolors(palette = "pal9") +
+  jcolors::scale_fill_jcolors(palette = "pal9") +
   ggplot2::theme_minimal()
 ```
 
@@ -283,6 +285,13 @@ pmp_usage_meta <- pmp_meta_zone |>
 
 pmp_usage_meta
 ```
+
+
+```{r}
+saveRDS(pmp_usage_meta, "Output_data/pmp_usage_meta.rds")
+```
+
+
 
 ```{r}
 pmp_usage_meta |>
