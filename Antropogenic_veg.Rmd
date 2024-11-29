@@ -1,0 +1,605 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-11-28"
+---
+
+```{r}
+library(tidyverse)
+library(sf)
+library(raster)
+```
+
+
+```{r}
+pmodern <- readRDS("H:/My Drive/Alex_lab_databases/Pmodern_revised.rds")
+```
+
+
+
+```{r}
+pmp_meta <- pmodern$pmp_meta
+pmp_pollen <- pmodern$pmp_pollen
+pmp_ecological <- pmodern$pmp_ecological
+```
+
+
+Poligonos
+```{r}
+latam_polygon <- rnaturalearth::ne_countries(scale = 'large', returnclass = "sf") |>
+  dplyr::filter(name %in% c("Mexico", "Guatemala", "Belize", "El Salvador", "Honduras", "Nicaragua", "Costa Rica", "Panama", "Dominican Rep.","Cuba", "Colombia", "Venezuela", "Ecuador", "Guyana", "Suriname", "French Guiana", "Peru", "Brazil", "Argentina", "Bolivia", "Uruguay", "Paraguay", "Chile","Puerto Rico","Jamaica")) |>
+  sf::st_union() |>
+  sf::st_crop(ymin = -34, ymax = 22, xmin=-106, xmax=-35) |>
+  sf::st_as_sf() 
+
+sh_polygon <- rnaturalearth::ne_countries(scale = 'large', returnclass = "sf") %>% filter(name %in% c("Venezuela", "Colombia", "Guyana", "Suriname", "France", "Antigua and Barbuda", "Dominica", "Ecuador", "Peru", "Uruguay", "Bolivia", "Paraguay", "Argentina", "Chile", "Brazil")) |>
+  sf::st_transform(crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0 +units=m +no_defs") |>
+  sf::st_crop(xmin = -85, xmax = -30, ymin = -60, ymax = 11) |> sf::st_union() |>
+  sf::st_as_sf() 
+
+nh_polygon <- rnaturalearth::ne_countries(scale = 'large', returnclass = "sf") %>%
+  filter(name %in% c("Mexico","Belize","Guatemala","Honduras","El Salvador","Nicaragua","Costa Rica","Panama", "Venezuela", "Colombia", "Guyana", "Suriname", "France", "Antigua and Barbuda", "Dominica", "Ecuador","Brazil")) |>
+  sf::st_transform(crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0 +units=m +no_defs") |>
+  sf::st_crop(xmin = -110, xmax = -50, ymin = 5, ymax = 22) |> sf::st_union() |>
+  sf::st_as_sf()
+
+ggplot2::ggplot() + ggplot2::geom_sf(data = sh_polygon) + ggplot2::theme_minimal()
+ggplot2::ggplot() + ggplot2::geom_sf(data = nh_polygon) + ggplot2::theme_minimal()
+ggplot2::ggplot() + ggplot2::geom_sf(data = latam_polygon) + ggplot2::theme_minimal()
+```
+
+
+
+
+```{r}
+maps <- sf::st_read("C:/Users/esmer/UoR/latam_climate_reconstruction/Input/Precipitation_polygon/my_new_polygon.shp") 
+maps1 <- sf::st_intersection(maps, latam_polygon) |> 
+  filter(!Value %in% c(0,14,23,24,10,9,16)) |>
+   filter(!(Value == 18 & sf::st_geometry_type(geometry) == "MULTIPOLYGON")) 
+
+plot0 <- ggplot2::ggplot() + 
+  ggplot2::geom_sf(data = latam_polygon, fill="transparent") +  
+  geom_sf(data = maps1, aes(fill=Value, colour=Value)) +
+  jcolors::scale_color_jcolors(palette = "pal9") +
+  jcolors::scale_fill_jcolors(palette = "pal9") +
+  theme_test()
+
+plot0
+```
+
+
+
+
+
+```{r}
+# Convert pmp_meta to sf object
+pmp_meta_sf <- pmp_meta %>%
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326)  # Assuming lon/lat is in WGS84 (EPSG:4326)
+
+# Perform spatial join to find which Value corresponds to each point
+pmp_meta_sf <- pmp_meta_sf %>%
+  sf::st_join(maps, join = sf::st_within)  # Join based on spatial location
+
+# View the result
+pmp_meta_sf 
+```
+
+
+```{r}
+pmp_meta_zone <- pmp_meta_sf %>%
+  mutate(
+    longitude = sf::st_coordinates(.)[, 1],   # Extract longitude
+    latitude = sf::st_coordinates(.)[, 2]     # Extract latitude
+  ) %>%
+  sf::st_drop_geometry() |>
+  filter(!Value%in%c(14, 23, NA))
+```
+
+
+
+```{r}
+ggplot2::ggplot() + 
+  ggplot2::geom_sf(data = latam_polygon) + 
+  geom_point(data=pmp_meta_zone, aes(x=longitude, y=latitude, fill=Value, colour=Value)) +
+  ggplot2::theme_minimal()
+```
+
+
+```{r}
+output_file <- "H:/My Drive/Alex_lab_databases/Output_data/HFP2009_reprojected.tif"
+
+raster_raw <- raster::raster(output_file)
+
+footprint_raster <- raster_raw |>
+  raster::crop(raster::extent(-108, -33, -40, 25)) |> 
+  raster::mask(latam_polygon)
+
+raster::plot(footprint_raster)
+```
+
+
+
+```{r}
+# Ensure that the CRS of maps1 matches the CRS of the raster
+maps1 <- st_transform(maps1, crs = st_crs(footprint_raster))
+
+# Extract cell numbers (indices) within each polygon
+cell_indices <- extract(footprint_raster, maps1, cellnumbers = TRUE)
+
+# Function to extract the coordinates (lat-lon) and values for each polygon
+extract_pixel_info <- function(cell_indices, polygon_value) {
+  if (length(cell_indices) == 0) return(NULL)  # Handle empty result
+  # Get the pixel locations (lat-lon) for the cell indices
+  pixel_coords <- xyFromCell(footprint_raster, cell_indices)
+  # Get the raster values at these pixel locations
+  pixel_values <- extract(footprint_raster, pixel_coords)
+  
+  # Return data with the polygon's Value, but filter out NAs
+  data <- data.frame(lon = pixel_coords[, 1], lat = pixel_coords[, 2], value = pixel_values, Value = polygon_value)
+  return(data[!is.na(data$value), ])  # Filter out rows where value is NA
+}
+
+# Apply the function to all polygons and include the polygon Value in each case
+pixel_data <- mapply(extract_pixel_info, cell_indices, maps1$Value, SIMPLIFY = FALSE)
+
+# Split the results by 'Value' to prevent a massive dataframe
+# This will create a list of dataframes, each corresponding to a different 'Value'
+pixel_data_split <- split(do.call(rbind, pixel_data), do.call(c, lapply(pixel_data, function(x) x$Value)))
+```
+
+
+
+```{r}
+saveRDS(pixel_data_split, "Output_data/pixel_data_split.rds")
+```
+
+
+
+```{r}
+pixel_data_split <- readRDS("Output_data/pixel_data_split.rds")
+```
+
+
+
+```{r}
+# Example: To access the dataframe for Value 21
+example <- pixel_data_split[["12"]]
+
+
+example |>
+  ggplot(aes(x=lon, y=lat, fill=value, colour=value)) +
+  geom_tile() +
+  theme()
+```
+
+
+
+Plot all zones
+```{r}
+# Convert raster values to a dataframe with lat-lon and raster values
+raster_df <- as.data.frame(footprint_raster, xy = TRUE, na.rm = TRUE)
+colnames(raster_df) <- c("lon", "lat", "value")
+
+# Create a data frame for each Value from the pixel_data_split list
+# Combine all the dataframes into one (with lat, lon, value, and Value)
+pixel_data_combined <- do.call(rbind, lapply(names(pixel_data_split), function(value) {
+  df <- pixel_data_split[[value]]
+  df$Value <- value
+  return(df)
+}))
+
+# Merge the raster data with the latam_polygon data
+latam_polygon <- st_transform(latam_polygon, crs = st_crs(footprint_raster))
+
+# Plot using ggplot2
+plot1 <- ggplot() +
+  geom_sf(data = latam_polygon, fill = NA, color = "black") +  # Plot the polygon
+  geom_raster(data = pixel_data_combined, aes(x = lon, y = lat, fill = value)) +  # Plot the raster values
+  scale_fill_viridis_c() +  # Use a color scale for the raster values
+  facet_wrap(~ Value) +  # Create a facet for each 'Value'
+  theme_minimal() + 
+  theme(legend.position = "bottom") +  # Adjust the legend position
+  labs(title = "Raster Values by Value", fill = "Raster Value")  # Add titles and labels
+
+plot1
+```
+
+
+
+```{r}
+ggsave(plot = plot1, "plot_zones.jpg", units = "cm", width = 23, height=18)
+```
+
+
+
+```{r}
+# Combine all the data back into a single dataframe (after splitting by Value)
+# You can use `do.call(rbind, pixel_data_split)` to combine them into a single dataframe
+pixel_df <- do.call(rbind, pixel_data_split)
+
+# Plot histogram of the 'value' column for each 'Value' as a separate facet
+plot2 <- ggplot(pixel_df, aes(x = value)) +
+  geom_histogram(binwidth = 1, color = "black", fill = "skyblue", alpha = 0.7) +  # You can adjust binwidth as needed
+  facet_wrap(~ Value, scales = "free_y") +  # Create a facet for each 'Value' with independent y-scales
+  theme_minimal() +
+  labs(title = "Histogram of 'value' within each 'Zone'", x = "Raster Value", y = "Frequency") +
+  theme(strip.text = element_text(size = 10))  # Adjust facet label size if needed
+
+plot2
+```
+
+
+```{r}
+ggsave(plot = plot2, "plot_histogram.jpg", units = "cm", width = 20, height=11)
+```
+
+
+```{r}
+# Combine all the data back into a single dataframe
+pixel_df <- do.call(rbind, pixel_data_split)
+
+# Calculate the median of 'value' for each 'Value'
+median_values <- pixel_df %>%
+  group_by(Value) %>%
+  summarise(median_value = median(value, na.rm = TRUE))
+
+# Plot histogram of the 'value' column for each 'Value' as a separate facet
+plot3 <- ggplot(pixel_df, aes(x = value)) +
+  geom_histogram(binwidth = 1, color = "black", fill = "skyblue", alpha = 0.7) +  # Adjust binwidth as needed
+  facet_wrap(~ Value, scales = "free_y") +  # Create a facet for each 'Value'
+  geom_vline(data = median_values, aes(xintercept = median_value), color = "red", linetype = "dashed", size = 1) +  # Add vertical line at median
+  theme_minimal() +
+  labs(title = "Histogram of 'value' within each 'Value'", x = "Raster Value", y = "Frequency") +
+  theme(strip.text = element_text(size = 10))  # Adjust facet label size if needed
+
+plot3
+```
+
+
+```{r}
+ggsave(plot = plot3, "plot_histogram_median.jpg", units = "cm", width = 20, height=11)
+```
+
+
+```{r}
+# Calculate the median of the 'value' column for each 'Value' in the split data
+medians_per_value <- lapply(pixel_data_split, function(df) median(df$value, na.rm = TRUE))
+
+# Convert the result into a dataframe for easier reading
+medians_df <- data.frame(Value = names(medians_per_value), Median_Value = unlist(medians_per_value))
+
+# View the result
+medians_df
+```
+
+
+```{r}
+pmp_usage_meta <- pmp_meta_zone |>
+  left_join(pmp_ecological) |>
+  left_join(medians_df) |>
+  rename(median_human_footprint = Median_Value) |>
+  mutate(class_exact = case_when(human_footprint_exact < median_human_footprint ~ "low", TRUE ~ "high"),
+         class_12km = case_when(human_footprint_avg12km < median_human_footprint ~ "low", TRUE ~ "high"))
+
+pmp_usage_meta
+```
+
+```{r}
+pmp_usage_meta |>
+  filter(Value == 15) |>
+  ggplot(aes(x=longitude, y=latitude,fill=class_exact, colour=class_exact)) +
+  geom_point()
+
+
+pmp_usage_meta |>
+  filter(Value == 15) |>
+  ggplot(aes(x=longitude, y=latitude,fill=class_12km, colour=class_12km)) +
+  geom_point()
+
+```
+
+
+
+
+```{r}
+pmp_usage1 <- pmp_usage_meta |>
+  dplyr::select(ID, Value, class_12km) |>
+  left_join(pmp_pollen)
+
+pmp_usage1
+```
+
+
+
+```{r}
+# Split the dataframe into a list of dataframes by 'Value'
+pmp_usage_split <- split(pmp_usage1, pmp_usage1$Value)
+
+# Access individual dataframes from the list, e.g., for Value "13":
+pmp_usage_split[["13"]]
+```
+
+
+```{r}
+# Set a seed for reproducibility
+set.seed(123)
+# Apply sampling directly to each dataframe in the list
+pmp_usage_sampled <- pmp_usage_split %>%
+  map(~ .x %>%
+        group_by(class_12km) %>%
+        slice_sample(prop = 0.7) %>%
+        ungroup())
+
+# Check the result for a specific Value, e.g., "13"
+pmp_usage_sampled[["13"]]
+```
+
+
+```{r}
+n_samples_train <- pmp_usage_split %>%
+  map(~ .x %>%
+        dplyr::select(Value, class_12km) %>%
+        group_by(class_12km) %>%
+        add_tally() %>%
+        dplyr::select(Value, class_12km, n) %>%
+        distinct() %>%
+        ungroup()) %>%
+  bind_rows()
+
+n_samples_train
+
+
+plot4 <- ggplot(data = n_samples_train) +
+  geom_bar(aes(x=class_12km, y =n, fill = class_12km), stat = "identity") +
+  scale_fill_manual(values = c(low="#d11141", high = "gray50")) +
+  facet_wrap(~Value, scales = "free_y") +
+  theme_test() +
+  labs(title = "Number of samples in trainning dataset")
+plot4  
+```
+
+
+```{r}
+ggsave(plot = plot4, "Output_figures/n_samples_train.jpg", units = "cm", width = 10, height = 6)
+```
+
+
+Filtrar taxa que ocurren en menos de 3 muestas, en este momento no lo realizamos, porque necesitariamos, pienso, re-escalar a 100%
+```{r}
+#pmp_usage_sampled[["13"]]
+
+#aux1 <- pmp_usage_sampled[["13"]]|>
+ # dplyr::select(ID,class_12km, Abies:Zollernia) |>
+ # pivot_longer(cols = -c(ID, class_12km)) |>
+ # filter(value > 0) |>
+ # group_by(class_12km,name) |>
+ # add_tally() |> #add a column with the number of ocurrences
+ # ungroup() |>
+ # dplyr::select(class_12km,name,n) |>
+ # distinct() |>
+  #filter(n >= 2) |> #filter taxa 
+  #dplyr::select(-n)
+
+#srandom_data_filtered <- pmp_usage_sampled[["13"]] |>
+  #pivot_longer(cols = -c(ID, Value, class_12km)) |>
+  #inner_join(aux1, by=c("class_12km","name")) |>
+  #filter(value > 0) 
+```
+
+
+Obtener el set de entrenamiento para cada zona
+```{r}
+# Apply the transformation to each dataframe in pmp_usage_sampled
+train_data_list <- pmp_usage_sampled %>%
+  map(~ {
+    zona <- unique(.x$Value)
+    
+    .x %>%
+      dplyr::select(-Value) %>%
+      pivot_longer(cols = -c(ID, class_12km), names_to = "name", values_to = "abundance") %>%
+      mutate(abundance = abundance * 100) %>%
+      group_by(name, class_12km) %>%
+      summarise(
+        MEAN = mean(abundance),
+        SD = sd(abundance),
+        .groups = "drop"
+      ) %>%
+      pivot_wider(names_from = class_12km, values_from = c(MEAN, SD)) %>%
+      mutate(zone = zona) %>%
+      dplyr::select(zone, everything()) %>%
+      rename_with(~ gsub("MEAN_", "mean_taxa_", .x), starts_with("MEAN_")) %>%
+      rename_with(~ gsub("SD_", "sd_taxa_", .x), starts_with("SD_"))
+  })
+
+# Access a specific transformed dataframe, e.g., for Value "13"
+aux0 <- train_data_list[["15"]]
+aux0
+
+#write.csv(aux0,"train_example.csv")
+```
+
+
+
+#To obatin the testing dataset
+```{r}
+# Apply the task to each dataframe in pmp_usage_sampled and pmp_usage_split for each Value
+test_data_list <- map2(pmp_usage_sampled, pmp_usage_split, ~ {
+  
+  # Get the unique Value from the sampled data
+  zona <- unique(.x$Value)
+  
+  # Perform the anti_join and transformation for each value
+  .y %>%
+    anti_join(.x, by = c("ID", "Value", "class_12km")) %>%
+    ungroup() %>%
+    pivot_longer(cols = -c(ID, Value, class_12km)) %>%
+    filter(value > 0) %>%
+    mutate(percent = value * 100) %>%
+    dplyr::select(-value) %>%
+    mutate(zone = zona)  # Add the zone from the sampled data
+})
+
+# Access the transformed data for a specific Value
+aux2 <- test_data_list[["13"]]
+
+unique(test_data_list[["13"]]$ID)
+```
+
+
+```{r}
+saveRDS(train_data_list,"Output_train_test/train_data_run1.rds")
+
+saveRDS(test_data_list,"Output_train_test/test_data_run1.rds")
+```
+
+
+```{r}
+pmp_usage_sampled 
+```
+
+
+```{r}
+train_data_list <- readRDS("Output_train_test/train_data_run1.rds")
+#srandom_data_percent <- readRDS("Output_train_test/srandom_data_percent_run1.rds")
+
+pmp_usage_sampled
+```
+
+
+```{r}
+#train_data_list[["13"]]
+#pmp_usage_sampled[["13"]]
+
+#zona <- unique(train_data_list[["13"]]$zone)
+#alto <- "high"
+#bajo <- "low"
+
+#top_taxa <- train_data_list[["13"]] %>%
+  #dplyr::select(name, !!sym(paste0("mean_taxa_", alto))) %>%
+  #arrange(desc(!!sym(paste0("mean_taxa_", alto)))) %>%
+  #slice_head(n = 25) |>
+  #dplyr::select(name) %>% 
+  #distinct() |>
+  #pull()
+
+#top_taxa_mean <- train_data_list[["13"]] %>%
+  #dplyr::select(name, !!sym(paste0("mean_taxa_", alto))) %>%
+  #arrange(desc(!!sym(paste0("mean_taxa_", alto)))) %>%
+  #slice_head(n = 25) |>
+  #rename(taxa = name, abundance = !!sym(paste0("mean_taxa_", alto)))
+
+#top_taxa_perc <- pmp_usage_sampled[["13"]] %>% 
+  #filter(class_12km == alto) |>
+  #dplyr::select(ID, Value, class_12km, all_of(top_taxa)) |>
+  #pivot_longer(cols = -c(ID,Value,class_12km), names_to = "taxa", values_to = "abundance") |>
+  #mutate(abundance = abundance * 100)
+
+#Count positive occurrences (in different samples)
+#positive_counts <- pmp_usage_sampled[["13"]] %>% 
+  #filter(class_12km == alto) |>
+  #dplyr::select(ID, Value, class_12km, all_of(top_taxa)) |>
+  #summarise_all(~ sum(. > 0, na.rm = TRUE)) |> 
+  #pivot_longer(cols = -c(ID,Value,class_12km)) |>
+  #dplyr::select(name,value)
+
+#plot_boxes <- top_taxa_perc |>  
+  #ggplot(aes(x = factor(taxa, levels = top_taxa), y = abundance)) + 
+  #geom_boxplot(outlier.alpha = 0.1, linewidth = 0.2, outlier.size = 0.2) +
+  #geom_point(data = top_taxa_mean, aes(x = factor(taxa, levels = top_taxa), y = abundance), color = "deepskyblue", size = 0.5) +
+  #expand_limits(y = c(-8, 80)) +
+  #scale_y_continuous(breaks=seq(0, 100, 10)) +
+  #geom_text(data = positive_counts, aes(x= name, y = -6, label = value), size=1.8, angle = 60, colour="dodgerblue4") +
+  #labs(x="", y="Abundance (%)", subtitle = paste0(zona,": ", alto, sep="")) +
+  #theme(plot.title = element_text(size=8),
+        #plot.subtitle = element_text(size=8),
+        #axis.text.x = element_text(face = "italic",size=9, angle = 90, hjust = 1, vjust = 0.3),
+        #axis.text.y = element_text(size=9),
+        #axis.title.x = element_text(size=9),
+        #axis.title.y = element_text(size=9),
+       # plot.caption = element_text(size=9,hjust = 0, face = "bold"),
+       # panel.grid.major = element_blank(),
+       # panel.grid.minor = element_blank(),
+       # panel.background = element_blank(),
+       # panel.border = element_rect(colour = "black", fill=NA))
+
+#plot_boxes
+
+```
+
+
+
+```{r}
+# Define a function to generate the plots and save them
+generate_plots <- function(zone, alto, bajo, train_data_list, pmp_usage_sampled) {
+  
+  # Get the top taxa for the specified category (alto)
+  top_taxa <- train_data_list[[zone]] %>%
+    dplyr::select(name, !!sym(paste0("mean_taxa_", alto))) %>%
+    arrange(desc(!!sym(paste0("mean_taxa_", alto)))) %>%
+    slice_head(n = 25) %>%
+    dplyr::select(name) %>%
+    distinct() %>%
+    pull()
+  
+  # Create the dataframe with the mean values for the top taxa (for plotting)
+  top_taxa_mean <- train_data_list[[zone]] %>%
+    dplyr::select(name, !!sym(paste0("mean_taxa_", alto))) %>%
+    arrange(desc(!!sym(paste0("mean_taxa_", alto)))) %>%
+    slice_head(n = 25) %>%
+    rename(taxa = name, abundance = !!sym(paste0("mean_taxa_", alto)))
+  
+  # Create the dataframe with the percentage values for the top taxa
+  top_taxa_perc <- pmp_usage_sampled[[zone]] %>% 
+    filter(class_12km == alto) %>%
+    dplyr::select(ID, Value, class_12km, all_of(top_taxa)) %>%
+    pivot_longer(cols = -c(ID, Value, class_12km), names_to = "taxa", values_to = "abundance") %>%
+    mutate(abundance = abundance * 100)
+  
+  # Count positive occurrences for each top taxa
+  positive_counts <- pmp_usage_sampled[[zone]] %>%
+    filter(class_12km == alto) %>%
+    dplyr::select(ID, Value, class_12km, all_of(top_taxa)) %>%
+    summarise_all(~ sum(. > 0, na.rm = TRUE)) %>%
+    pivot_longer(cols = -c(ID, Value, class_12km)) %>%
+    dplyr::select(name, value)
+  
+  # Generate the boxplot for the top taxa
+  plot_boxes <- top_taxa_perc %>%  
+    ggplot(aes(x = factor(taxa, levels = top_taxa), y = abundance)) + 
+    geom_boxplot(outlier.alpha = 0.1, linewidth = 0.2, outlier.size = 0.2) +
+    geom_point(data = top_taxa_mean, aes(x = factor(taxa, levels = top_taxa), y = abundance), color = "deepskyblue", size = 0.5) +
+    expand_limits(y = c(-8, 80)) +
+    scale_y_continuous(breaks = seq(0, 100, 10)) +
+    geom_text(data = positive_counts, aes(x = name, y = -6, label = value), size = 1.8, angle = 60, colour = "dodgerblue4") +
+    labs(x = "", y = "Abundance (%)", subtitle = paste0(zone, ": ", alto)) +
+    theme(plot.title = element_text(size = 8),
+          plot.subtitle = element_text(size = 8),
+          axis.text.x = element_text(face = "italic", size = 9, angle = 90, hjust = 1, vjust = 0.3),
+          axis.text.y = element_text(size = 9),
+          axis.title.x = element_text(size = 9),
+          axis.title.y = element_text(size = 9),
+          plot.caption = element_text(size = 9, hjust = 0, face = "bold"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          panel.border = element_rect(colour = "black", fill = NA))
+  
+  # Save the plot as a file
+  ggsave(paste0("plot_", zone, "_", alto, ".png"), plot = plot_boxes, units="cm", width = 10, height = 10)
+}
+
+# Iterate through all zones and categories ("high" and "low") and generate/save the plots
+zones <- names(train_data_list)  # Get all zones
+categories <- c("high", "low")  # Categories
+
+for (zone in zones) {
+  for (category in categories) {
+    generate_plots(zone, category, category, train_data_list, pmp_usage_sampled)
+  }
+}
+
+```
+
+
+
+
