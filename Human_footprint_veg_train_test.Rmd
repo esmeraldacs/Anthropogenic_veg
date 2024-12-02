@@ -192,31 +192,7 @@ example |>
   geom_tile() +
   theme()
 
-example <- pixel_data_split[["13"]]
-example |>
-  ggplot(aes(x=lon, y=lat, fill=value, colour=value)) +
-  geom_tile() +
-  theme()
-
 example <- pixel_data_split[["15"]]
-example |>
-  ggplot(aes(x=lon, y=lat, fill=value, colour=value)) +
-  geom_tile() +
-  theme()
-
-example <- pixel_data_split[["17"]]
-example |>
-  ggplot(aes(x=lon, y=lat, fill=value, colour=value)) +
-  geom_tile() +
-  theme()
-
-example <- pixel_data_split[["18"]]
-example |>
-  ggplot(aes(x=lon, y=lat, fill=value, colour=value)) +
-  geom_tile() +
-  theme()
-
-example <- pixel_data_split[["21"]]
 example |>
   ggplot(aes(x=lon, y=lat, fill=value, colour=value)) +
   geom_tile() +
@@ -355,6 +331,12 @@ pmp_usage_split <- split(pmp_usage1, pmp_usage1$region)
 # Access individual dataframes from the list, e.g., for Value "13":
 pmp_usage_split[["13"]]
 ```
+
+
+```{r}
+saveRDS(pmp_usage_split, "Output_data_human_footprint/pmp_usage_split.rds")
+```
+
 
 
 ```{r}
@@ -569,37 +551,37 @@ pmp_usage_sampled
 
 ```{r}
 # Define a function to generate the plots and save them
-generate_plots <- function(zone, alto, bajo, train_data_list, pmp_usage_sampled) {
+generate_plots <- function(region, YES, NO, train_data_list, pmp_usage_sampled) {
   
   # Get the top taxa for the specified category (alto)
-  top_taxa <- train_data_list[[zone]] %>%
-    dplyr::select(name, !!sym(paste0("mean_taxa_", alto))) %>%
-    arrange(desc(!!sym(paste0("mean_taxa_", alto)))) %>%
+  top_taxa <- train_data_list[[region]] %>%
+    dplyr::select(name, !!sym(paste0("mean_taxa_", YES))) %>%
+    arrange(desc(!!sym(paste0("mean_taxa_", YES)))) %>%
     slice_head(n = 25) %>%
     dplyr::select(name) %>%
     distinct() %>%
     pull()
-  
+
   # Create the dataframe with the mean values for the top taxa (for plotting)
-  top_taxa_mean <- train_data_list[[zone]] %>%
-    dplyr::select(name, !!sym(paste0("mean_taxa_", alto))) %>%
-    arrange(desc(!!sym(paste0("mean_taxa_", alto)))) %>%
+  top_taxa_mean <- train_data_list[[region]] %>%
+    dplyr::select(name, !!sym(paste0("mean_taxa_", YES))) %>%
+    arrange(desc(!!sym(paste0("mean_taxa_", YES)))) %>%
     slice_head(n = 25) %>%
-    rename(taxa = name, abundance = !!sym(paste0("mean_taxa_", alto)))
+    rename(taxa = name, abundance = !!sym(paste0("mean_taxa_", YES)))
   
   # Create the dataframe with the percentage values for the top taxa
-  top_taxa_perc <- pmp_usage_sampled[[zone]] %>% 
-    filter(class_12km == alto) %>%
-    dplyr::select(ID, Value, class_12km, all_of(top_taxa)) %>%
-    pivot_longer(cols = -c(ID, Value, class_12km), names_to = "taxa", values_to = "abundance") %>%
+  top_taxa_perc <- pmp_usage_sampled[[region]] %>% 
+    filter(class_12km == YES) %>%
+    dplyr::select(ID, region, class_12km, all_of(top_taxa)) %>%
+    pivot_longer(cols = -c(ID, region, class_12km), names_to = "taxa", values_to = "abundance") %>%
     mutate(abundance = abundance * 100)
-  
+ 
   # Count positive occurrences for each top taxa
-  positive_counts <- pmp_usage_sampled[[zone]] %>%
-    filter(class_12km == alto) %>%
-    dplyr::select(ID, Value, class_12km, all_of(top_taxa)) %>%
+  positive_counts <- pmp_usage_sampled[[region]] %>%
+    filter(class_12km == YES) %>%
+    dplyr::select(ID, region, class_12km, all_of(top_taxa)) %>%
     summarise_all(~ sum(. > 0, na.rm = TRUE)) %>%
-    pivot_longer(cols = -c(ID, Value, class_12km)) %>%
+    pivot_longer(cols = -c(ID, region, class_12km)) %>%
     dplyr::select(name, value)
   
   # Generate the boxplot for the top taxa
@@ -610,7 +592,7 @@ generate_plots <- function(zone, alto, bajo, train_data_list, pmp_usage_sampled)
     expand_limits(y = c(-8, 80)) +
     scale_y_continuous(breaks = seq(0, 100, 10)) +
     geom_text(data = positive_counts, aes(x = name, y = -6, label = value), size = 1.8, angle = 60, colour = "dodgerblue4") +
-    labs(x = "", y = "Abundance (%)", subtitle = paste0(zone, ": ", alto)) +
+    labs(x = "", y = "Abundance (%)", subtitle = paste0(zone, ": ", YES)) +
     theme(plot.title = element_text(size = 8),
           plot.subtitle = element_text(size = 8),
           axis.text.x = element_text(face = "italic", size = 9, angle = 90, hjust = 1, vjust = 0.3),
@@ -624,16 +606,16 @@ generate_plots <- function(zone, alto, bajo, train_data_list, pmp_usage_sampled)
           panel.border = element_rect(colour = "black", fill = NA))
   
   # Save the plot as a file
-  ggsave(paste0("plot_", zone, "_", alto, ".png"), plot = plot_boxes, units="cm", width = 10, height = 10)
+  ggsave(paste0("Output_figures_human_footprint/plot_", region, "_", YES, ".png"), plot = plot_boxes, units="cm", width = 10, height = 10)
 }
 
 # Iterate through all zones and categories ("high" and "low") and generate/save the plots
-zones <- names(train_data_list)  # Get all zones
-categories <- c("high", "low")  # Categories
+regions <- names(train_data_list)  # Get all zones
+categories <- c("YES", "NO")  # Categories
 
-for (zone in zones) {
+for (region in zones) {
   for (category in categories) {
-    generate_plots(zone, category, category, train_data_list, pmp_usage_sampled)
+    generate_plots(region, category, category, train_data_list, pmp_usage_sampled)
   }
 }
 
