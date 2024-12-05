@@ -11,6 +11,12 @@ library(tidyverse)
 ```
 
 
+```{r}
+pmp_usage_split <- readRDS("Output_data_human_footprint/pmp_usage_split.rds")
+```
+
+
+
 
 ```{r}
 evaluate_model <- function(seed, pmp_usage_split) {
@@ -86,7 +92,7 @@ evaluate_model <- function(seed, pmp_usage_split) {
       slice_max(value) %>%
       ungroup()
     
-    pred_biome <- distinct(select(stest_df, region,ID,class_12km)) %>%
+    pred_biome <- distinct(dplyr::select(stest_df, region,ID,class_12km)) %>%
       inner_join(sqsc, by = "ID") %>%
       dplyr::select(-value)
     
@@ -122,7 +128,7 @@ set.seed(189)
 
 # Generate a vector of 5 random integers between 1 and 1,000,000. 
 # These will be used as different random seeds for each iteration of the model evaluation.
-seeds <- sample(1:1e6, 5)
+seeds <- sample(1:1e6, 3)
 
 # Apply the `evaluate_model()` function to each seed in the `seeds` vector, 
 # - `map_dfr()` is a purrr function that iterates over each seed, applies `evaluate_model()` to it, 
@@ -131,6 +137,11 @@ seeds <- sample(1:1e6, 5)
 # - The `pmp_usage_split` argument is passed to `evaluate_model()` along with each seed.
 # - `.id = "iteration"` adds an additional column to the resulting dataframe that indicates which iteration (or seed) the row belongs to.
 results <- map_dfr(seeds, ~ evaluate_model(.x, pmp_usage_split), .id = "iteration")
+```
+
+
+```{r}
+saveRDS(results, "Output_data_results_human_footprint/results_iteration_1.rds")
 ```
 
 
@@ -145,6 +156,67 @@ summary_metrics <- results %>%
     SD_Balanced_Accuracy = sd(Balanced_accuracy, na.rm = TRUE)
   )
 ```
+
+
+
+
+
+
+```{r}
+results |>
+  ggplot() + 
+  geom_density(aes(x = Balanced_accuracy, fill=Region, colour=Region), alpha = .8) +
+  # Add a vertical line for the mean of each Region
+  geom_vline(data = results |> group_by(Region) |> summarise(mean_accuracy = mean(Accuracy)),
+             aes(xintercept = mean_accuracy), color = "black", linetype = "dashed", size = 1) +
+  # Add text for the mean value for each Region
+  geom_text(data = results |> group_by(Region) |> summarise(mean_accuracy = mean(Accuracy)),
+            aes(x = mean_accuracy, y = 0.02, label = round(mean_accuracy, 2)),
+            color = "black", angle = 90, hjust = -0.08, vjust = 1) +
+  facet_wrap(~Region) +
+  jcolors::scale_color_jcolors(palette = "pal9") +
+  jcolors::scale_fill_jcolors(palette = "pal9") +
+  theme(panel.background = element_rect(fill="transparent", colour="gray80"),
+        strip.background = element_rect(fill="transparent", colour="gray80"))
+
+results |>
+  ggplot(aes(x = Balanced_accuracy, fill=Region, colour=Region)) + 
+  geom_density(alpha = .7) +
+  jcolors::scale_color_jcolors(palette = "pal9") +
+  jcolors::scale_fill_jcolors(palette = "pal9") +
+  labs(title = "Balanced accuracy") +
+  theme_test()
+
+results |>
+  ggplot(aes(x = Balanced_accuracy, fill=Region, colour=Region)) + 
+  geom_density(alpha = 1) +
+  facet_wrap(~Region) +
+  jcolors::scale_color_jcolors(palette = "pal9") +
+  jcolors::scale_fill_jcolors(palette = "pal9") +
+  labs(title = "Balanced accuracy") +
+  theme_test()
+```
+
+
+```{r}
+# Calculate the mean of Balanced_accuracy
+mean_balance_accuracy <- mean(results$Balanced_accuracy)
+
+# Plot with density and mean line
+results |>
+  ggplot(aes(x = Balanced_accuracy)) + 
+  geom_density(alpha = .7, fill = "#800080", colour = "#800080") +
+  geom_vline(aes(xintercept = mean_balance_accuracy), 
+             color = "white", linetype = "dashed", size = 1) +
+  annotate("text", x = mean_balance_accuracy + 1, y = 0.02, 
+           label = paste("Mean =", round(mean_balance_accuracy, 2)), 
+           color = "white", size = 5, hjust = 0) +
+  labs(title = "All regions Balanced accuracy") +
+  theme_test()
+```
+
+
+
 
 
 
