@@ -12,9 +12,8 @@ library(raster)
 
 
 ```{r}
-pmodern <- readRDS("H:/My Drive/Alex_lab_databases/Pmodern_revised.rds")
+pmodern <- readRDS("H:/My Drive/Alex_lab_databases/Pmodern_revised_ecol.rds")
 ```
-
 
 
 ```{r}
@@ -24,7 +23,6 @@ pmp_ecological <- pmodern$pmp_ecological
 ```
 
 
-Poligonos
 ```{r}
 latam_polygon <- rnaturalearth::ne_countries(scale = 'large', returnclass = "sf") |>
   dplyr::filter(name %in% c("Mexico", "Guatemala", "Belize", "El Salvador", "Honduras", "Nicaragua", "Costa Rica", "Panama", "Dominican Rep.","Cuba", "Colombia", "Venezuela", "Ecuador", "Guyana", "Suriname", "French Guiana", "Peru", "Brazil", "Argentina", "Bolivia", "Uruguay", "Paraguay", "Chile","Puerto Rico","Jamaica")) |>
@@ -32,25 +30,35 @@ latam_polygon <- rnaturalearth::ne_countries(scale = 'large', returnclass = "sf"
   sf::st_crop(ymin = -34, ymax = 22, xmin=-106, xmax=-35) |>
   sf::st_as_sf() 
 
-sh_polygon <- rnaturalearth::ne_countries(scale = 'large', returnclass = "sf") %>% filter(name %in% c("Venezuela", "Colombia", "Guyana", "Suriname", "France", "Antigua and Barbuda", "Dominica", "Ecuador", "Peru", "Uruguay", "Bolivia", "Paraguay", "Argentina", "Chile", "Brazil")) |>
-  sf::st_transform(crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0 +units=m +no_defs") |>
-  sf::st_crop(xmin = -85, xmax = -30, ymin = -60, ymax = 11) |> sf::st_union() |>
-  sf::st_as_sf() 
-
-nh_polygon <- rnaturalearth::ne_countries(scale = 'large', returnclass = "sf") %>%
-  filter(name %in% c("Mexico","Belize","Guatemala","Honduras","El Salvador","Nicaragua","Costa Rica","Panama", "Venezuela", "Colombia", "Guyana", "Suriname", "France", "Antigua and Barbuda", "Dominica", "Ecuador","Brazil")) |>
-  sf::st_transform(crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0 +units=m +no_defs") |>
-  sf::st_crop(xmin = -110, xmax = -50, ymin = 5, ymax = 22) |> sf::st_union() |>
-  sf::st_as_sf()
-
-ggplot2::ggplot() + ggplot2::geom_sf(data = sh_polygon) + ggplot2::theme_minimal()
-ggplot2::ggplot() + ggplot2::geom_sf(data = nh_polygon) + ggplot2::theme_minimal()
 ggplot2::ggplot() + ggplot2::geom_sf(data = latam_polygon) + ggplot2::theme_minimal()
 ```
 
 
+Primero volvemos a extraer los valores exacto y con buffer de 12km radio para cada muestra de polen
+```{r}
+output_file <- "H:/My Drive/Alex_lab_databases/Output_data/HFP2009_reprojected.tif"
+
+raster_raw <- raster::raster(output_file)
+
+footprint_raster <- raster_raw |>
+  raster::crop(raster::extent(-108, -33, -40, 25)) |> 
+  raster::mask(latam_polygon)
+```
 
 
+```{r}
+# Extract exact point values
+pmp_ecological <- pmp_ecological |>
+  left_join(pmp_meta) |>
+  dplyr::select(ID,hill_n2,lon,lat) |>
+  mutate(hfp_exact = extract(footprint_raster, cbind(lon, lat))) |>
+# Extract values within the buffer (12 km = 12000 meters) and compute the mean
+  mutate(hfp_12km = extract(footprint_raster, cbind(lon, lat), buffer = 12000, fun = mean),
+         hfp_24km = extract(footprint_raster, cbind(lon, lat), buffer = 24000, fun = mean))
+```
+
+
+#--------------
 ```{r}
 maps <- sf::st_read("C:/Users/esmer/UoR/latam_climate_reconstruction/Input/Precipitation_polygon/my_new_polygon.shp") 
 
@@ -69,8 +77,6 @@ plot0 <- ggplot2::ggplot() +
 
 plot0
 ```
-
-
 
 
 
@@ -110,36 +116,56 @@ ggplot2::ggplot() +
 ```
 
 
+
+
+
+Chunk que hay que correr solo si queremos el plot
 ```{r}
-output_file <- "H:/My Drive/Alex_lab_databases/Output_data/HFP2009_reprojected.tif"
-
-raster_raw <- raster::raster(output_file)
-
-footprint_raster <- raster_raw |>
-  raster::crop(raster::extent(-108, -33, -40, 25)) |> 
-  raster::mask(latam_polygon)
-
 raster_df <- as.data.frame(footprint_raster, xy = TRUE) |>
   filter(!is.na(HFP2009_reprojected))
 
-# Plot the raster using ggplot
-plot0 <- ggplot() +
+
+
+plot0.2 <- ggplot() +
   ggplot2::geom_sf(data = latam_polygon,fill="gray95") +
   geom_tile(data = raster_df, aes(x = x, y = y, fill = HFP2009_reprojected)) +
   #scale_fill_viridis_c(name = "Value", option = "plasma") +
-  jcolors::scale_fill_jcolors_contin(palette = "pal2") +
-# jcolors::scale_colour_jcolors(palette = "pal2") +
-  labs(title = "Human footprint (Venter; et al. 2016)",
-       x = "Longitude",
-       y = "Latitude") +
-  theme_test()
+  #jcolors::scale_fill_jcolors_contin(palette = "pal12", bias = 0.8) +
+  scico::scale_fill_scico(palette = "lipari") +
+  labs(x = NULL,
+       y = NULL,
+       fill  = "HFP") +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  ggspatial::annotation_north_arrow(location = "tr", which_north = "true",height = unit(4.8, "mm"), width = unit(4.8, "mm"), pad_x = unit(2, "mm"), pad_y = unit(2, "mm"),style = ggspatial::north_arrow_nautical(fill = c("grey40", "white"),line_col = "grey20", text_family = "Book Antiqua",text_size = 5.5)) +  # "Mongolian Baiti"
+  annotate(geom = "text", x = -98.3, y = 2, label = "Pacific", 
+    fontface = "italic", color = "gray25", size = 2) +
+  annotate(geom = "text", x = -98.4, y = 0, label = "Ocean", 
+    fontface = "italic", color = "gray25", size = 2) +
+  theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.title.x = element_text(size=7.5,color = "black"),
+        axis.title.y = element_text(size=7.5, angle=90),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+       # axis.ticks = element_blank(),
+        legend.key.size = unit(0.20,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=6.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 6.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.15,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+        legend.position = c(0.1,0.2))
 
-plot0
+plot0.2
 ```
 
 
 ```{r}
-ggsave(plot = plot0, "Output_figures_forest/mapa_raster.jpg", units = "cm", height = 13, width = 13)
+ggsave(plot = plot0.2, "G:/My Drive/Postdoc UNAM docs/Renovación posdoc DGAPA/mapa_HFP_lipari.jpg", units = "cm", height = 10, width = 10)
 ```
 
 
@@ -220,13 +246,27 @@ latam_polygon <- st_transform(latam_polygon, crs = st_crs(footprint_raster))
 
 # Plot using ggplot2
 plot1 <- ggplot() +
-  geom_sf(data = latam_polygon, fill = "gray95", color = "black") +  # Plot the polygon
+  #geom_sf(data = latam_polygon, fill = "gray95", color = "black") +  # Plot the polygon
   geom_raster(data = pixel_data_combined, aes(x = lon, y = lat, fill = value)) +  # Plot the raster values
-  scale_fill_viridis_c() +  # Use a color scale for the raster values
-  facet_wrap(~ region) +  # Create a facet for each 'Value'
-  theme_minimal() + 
-  theme(legend.position = "bottom") +  # Adjust the legend position
-  labs(title = "Pressure by region", fill = "Pressure")  # Add titles and labels
+  scico::scale_fill_scico(palette = "lipari") +
+ # scale_fill_viridis_c() +  # Use a color scale for the raster values
+  facet_wrap(~ region, ncol=1, scales = "free") +  # Create a facet for each 'Value'
+  labs(fill = "Pressure", x=NULL, y=NULL) +
+  theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+        strip.text = element_text(size = 7.5, hjust = 0, vjust = 0),
+        strip.background = element_rect(fill="transparent", colour="transparent"),
+        legend.key.size = unit(0.20,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=6.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 6.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.15,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25))
 
 plot1
 ```
@@ -234,7 +274,7 @@ plot1
 
 
 ```{r}
-ggsave(plot = plot1, "Output_figures_human_footprint/plot_zones.jpg", units = "cm", width = 23, height=18)
+ggsave(plot = plot1, "G:/My Drive/Postdoc UNAM docs/Renovación posdoc DGAPA/plot_zones.pdf", units = "cm", width = 7, height=26)
 ```
 
 
@@ -251,12 +291,27 @@ median_values <- pixel_df %>%
 
 # Plot histogram of the 'value' column for each 'region' as a separate facet
 plot3 <- ggplot(pixel_df, aes(x = value)) +
-  geom_histogram(binwidth = 1, color = "black", fill = "skyblue", alpha = 0.7, linewidth = 0.3) +  # Adjust binwidth as needed
-  facet_wrap(~ region, scales = "free_y") +  # Create a facet for each 'Value'
+  geom_histogram(binwidth = 1, color = "black", fill = "skyblue", alpha = 0.7, linewidth = 0.2) +  # Adjust binwidth as needed
+  facet_wrap(~ region, scales = "free", ncol=1) +  
   geom_vline(data = median_values, aes(xintercept = median_value), color = "red", linetype = "dashed", size = 1) +  # Add vertical line at median
-  theme_minimal() +
-  labs(title = "Histogram of value within each region", x = "Pressure", y = "Frequency") +
-  theme(strip.text = element_text(size = 10))  # Adjust facet label size if needed
+  labs(x = NULL, y = NULL) +
+  scale_x_continuous(expand = c(0,0)) +
+  theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+        strip.text = element_text(size = 7.5, hjust = 0, vjust = 0),
+        strip.background = element_rect(fill="transparent", colour="transparent"),
+        legend.key.size = unit(0.20,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=6.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 6.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.15,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25))
+
 
 plot3
 ```
@@ -264,7 +319,7 @@ plot3
 
 
 ```{r}
-ggsave(plot = plot3, "Output_figures_human_footprint/plot_histogram_median.jpg", units = "cm", width = 20, height=11)
+ggsave(plot = plot3, "G:/My Drive/Postdoc UNAM docs/Renovación posdoc DGAPA/plot_histograms.pdf", units = "cm", width = 6.5, height=26)
 ```
 
 
@@ -282,7 +337,7 @@ medians_df
 
 ```{r}
 pmp_usage_meta <- pmp_meta_zone |>
-  left_join(pmp_ecological) |>
+ # left_join(pmp_ecological) |>
   left_join(medians_df) |>
   rename(median_human_footprint = Median_Value) |>
   mutate(class_exact = case_when(human_footprint_exact < median_human_footprint ~ "NO", TRUE ~ "YES"),
@@ -336,10 +391,8 @@ saveRDS(pmp_usage_split, "Output_data_human_footprint/pmp_usage_split.rds")
 
 
 ```{r}
-pmp_usage_split[["13"]]
-
 # Set a seed for reproducibility
-set.seed(123)
+set.seed(1243)
 # Apply sampling directly to each dataframe in the list
 pmp_usage_sampled <- pmp_usage_split %>%
   map(~ .x %>%
@@ -349,6 +402,27 @@ pmp_usage_sampled <- pmp_usage_split %>%
 
 # Check the result for a specific Value, e.g., "13"
 pmp_usage_sampled[["13"]]
+```
+
+
+Filtrar taxa que ocurren en menos de 3 muestas, en este momento no lo realizamos, porque necesitariamos, pienso, re-escalar a 100%
+```{r}
+# Pre-filtered auxiliary data
+#aux1 <- pmp_usage_sampled[["13"]] |>
+  #pivot_longer(cols = -c(region, class_12km, ID)) |>
+  #filter(value > 0) |>
+  #count(class_12km, region, name) |>
+  #filter(n >= 2) |>
+  #dplyr::select(-n)
+
+# Main dataset with auxiliary filtering applied
+#pmp_usage_sampled_13 <- pmp_usage_sampled[["13"]] |>
+  #pivot_longer(cols = -c(ID, region, class_12km)) |>
+  #inner_join(aux1, by = c("region", "class_12km", "name")) |>
+  #filter(value > 0) |>
+  #group_by(ID) |>
+  #mutate(value = (value / sum(value)) * 100) |>
+  #ungroup()
 ```
 
 
@@ -368,52 +442,74 @@ n_samples_train <- pmp_usage_split %>%
 n_samples_train
 
 
-plot4 <- ggplot(data = n_samples_train) +
+n_samples_train_aux <- n_samples_train |>
+  mutate(class_12km = case_when(class_12km == "YES" ~ "Impact", TRUE ~ "No impact"))
+
+
+plot4 <- ggplot(data = n_samples_train_aux) +
   geom_bar(aes(x=class_12km, y =n, fill = class_12km), stat = "identity") +
-  scale_fill_manual(values = c(NO="#d11141", YES="gray50")) +
-  facet_wrap(~region, scales = "free_y") +
-  theme_test() +
-  labs(title = "Number of samples in trainning dataset")
+  scale_fill_manual(values = c(`No impact`="royalblue4", Impact="indianred1")) +
+  facet_wrap(~region, scales = "free", ncol=1) +
+  scale_x_discrete(expand = c(0,0)) +
+  theme(panel.background = element_rect(fill="white",color="transparent"),
+        panel.border = element_rect(fill="transparent",color="black"),
+        panel.grid = element_blank(),
+        axis.text.x = element_text(size=7.5),
+        axis.text.y = element_text(size=7.5),
+        strip.text = element_text(size = 7.5, hjust = 0, vjust = 0),
+        strip.background = element_rect(fill="transparent", colour="transparent"),
+        legend.key.size = unit(0.20,"cm"),
+        legend.text.align = 0,
+        legend.text=element_text(size=6.5),
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 6.5),
+        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.15,l=0.08),
+        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25))
+
 plot4  
 ```
 
 
 ```{r}
-ggsave(plot = plot4, "Output_figures_human_footprint/n_samples_train.jpg", units = "cm", width = 10, height = 6)
+ggsave(plot = plot4, "G:/My Drive/Postdoc UNAM docs/Renovación posdoc DGAPA/n_samples_train.pdf", units = "cm", width = 6.5, height=26)
 ```
 
 
-Filtrar taxa que ocurren en menos de 3 muestas, en este momento no lo realizamos, porque necesitariamos, pienso, re-escalar a 100%
+
 ```{r}
-#pmp_usage_sampled[["13"]]
+pmp_usage_sampled_clean <- pmp_usage_sampled %>%
+  map(~ {
+    .x |>
+      pivot_longer(cols = -c(ID, region, class_12km)) |>
+      filter(value > 0) |>
+      inner_join(
+        .x |>
+          pivot_longer(cols = -c(region, class_12km, ID)) |>
+          filter(value > 0) |>
+          count(region, class_12km, name) |>
+          filter(n >= 2) |>
+          dplyr::select(-n), 
+        by = c("region", "class_12km", "name")
+        ) |>
+      group_by(ID) |>
+      mutate(value = (value / sum(value)) * 100) |>
+      ungroup() |>
+      arrange(name) |>
+      pivot_wider(id_cols = c(region, class_12km, ID), values_fill = 0)
+      
+  })
 
-#aux1 <- pmp_usage_sampled[["13"]]|>
- # dplyr::select(ID,class_12km, Abies:Zollernia) |>
- # pivot_longer(cols = -c(ID, class_12km)) |>
- # filter(value > 0) |>
- # group_by(class_12km,name) |>
- # add_tally() |> #add a column with the number of ocurrences
- # ungroup() |>
- # dplyr::select(class_12km,name,n) |>
- # distinct() |>
-  #filter(n >= 2) |> #filter taxa 
-  #dplyr::select(-n)
-
-#srandom_data_filtered <- pmp_usage_sampled[["13"]] |>
-  #pivot_longer(cols = -c(ID, Value, class_12km)) |>
-  #inner_join(aux1, by=c("class_12km","name")) |>
-  #filter(value > 0) 
+pmp_usage_sampled_clean[["12"]]
 ```
 
 
 Obtener el set de entrenamiento para cada zona
 ```{r}
 # Apply the transformation to each dataframe in pmp_usage_sampled
-train_data_list <- pmp_usage_sampled %>%
-  map(~ {
-    .x %>%
+train_data_list <- pmp_usage_sampled_clean %>%
+  map(~ { .x %>%
       pivot_longer(cols = -c(region, class_12km, ID), names_to = "name", values_to = "abundance") %>%
-      mutate(abundance = abundance * 100) %>%
       group_by(region, class_12km, name) %>%
       summarise(
         mean_taxa = mean(abundance),
@@ -437,7 +533,7 @@ aux0
 #To obatin the testing dataset
 ```{r}
 # Apply the task to each dataframe in pmp_usage_sampled and pmp_usage_split for each region
-test_data_list <- map2(pmp_usage_sampled, pmp_usage_split, ~ {
+test_data_list <- map2(pmp_usage_sampled_clean, pmp_usage_split, ~ {
   
   # Perform the anti_join and transformation for each value
   .y %>%
@@ -609,6 +705,12 @@ for (region in regions) {
     generate_plots(region, category, category, train_data_list, pmp_usage_sampled)
   }
 }
+```
+
+
+
+```{r}
+
 
 ```
 
