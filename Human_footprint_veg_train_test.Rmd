@@ -10,19 +10,17 @@ library(sf)
 library(raster)
 ```
 
-
+Importar base de datos de polen moderno de Alex
 ```{r}
 pmodern <- readRDS("H:/My Drive/Alex_lab_databases/Pmodern_revised_ecol.rds")
-```
 
 
-```{r}
 pmp_meta <- pmodern$pmp_meta
 pmp_pollen <- pmodern$pmp_pollen
 pmp_ecological <- pmodern$pmp_ecological
 ```
 
-
+Importar poligono de latinoamerica
 ```{r}
 latam_polygon <- rnaturalearth::ne_countries(scale = 'large', returnclass = "sf") |>
   dplyr::filter(name %in% c("Mexico", "Guatemala", "Belize", "El Salvador", "Honduras", "Nicaragua", "Costa Rica", "Panama", "Dominican Rep.","Cuba", "Colombia", "Venezuela", "Ecuador", "Guyana", "Suriname", "French Guiana", "Peru", "Brazil", "Argentina", "Bolivia", "Uruguay", "Paraguay", "Chile","Puerto Rico","Jamaica")) |>
@@ -34,18 +32,15 @@ ggplot2::ggplot() + ggplot2::geom_sf(data = latam_polygon) + ggplot2::theme_mini
 ```
 
 
-Primero volvemos a extraer los valores exacto y con buffer de 12km radio para cada muestra de polen
+Importar HFP raster
 ```{r}
-output_file <- "H:/My Drive/Alex_lab_databases/Output_data/HFP2009_reprojected.tif"
-
-raster_raw <- raster::raster(output_file)
-
-footprint_raster <- raster_raw |>
+footprint_raster <- raster::raster("H:/My Drive/Alex_lab_databases/Output_data/HFP2009_reprojected.tif") |>
   raster::crop(raster::extent(-108, -33, -40, 25)) |> 
   raster::mask(latam_polygon)
 ```
 
 
+Extraer de nuevo el valor de HFP para cada muestra, con diferentes buffers
 ```{r}
 # Extract exact point values
 pmp_ecological <- pmp_ecological |>
@@ -58,7 +53,7 @@ pmp_ecological <- pmp_ecological |>
 ```
 
 
-#--------------
+Importar el mapa de regiones ecologicas de la EPA
 ```{r}
 maps <- sf::st_read("C:/Users/esmer/UoR/latam_climate_reconstruction/Input/Precipitation_polygon/my_new_polygon.shp") 
 
@@ -67,46 +62,29 @@ maps1 <- sf::st_intersection(maps, latam_polygon) |>
    filter(!(Value == 18 & sf::st_geometry_type(geometry) == "MULTIPOLYGON")) |>
    rename(region = Value)
 
-
-plot0 <- ggplot2::ggplot() + 
+ggplot2::ggplot() + 
   ggplot2::geom_sf(data = latam_polygon, fill="transparent") +  
   geom_sf(data = maps1, aes(fill=region, colour=region)) +
   jcolors::scale_color_jcolors(palette = "pal9") +
   jcolors::scale_fill_jcolors(palette = "pal9") +
   theme_test()
-
-plot0
 ```
 
 
-
+Extraer el valor del mapa de la EPA para cada region
 ```{r}
-# Convert pmp_meta to sf object
-pmp_meta_sf <- pmp_meta %>%
-  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326)  # Assuming lon/lat is in WGS84 (EPSG:4326)
-
-# Perform spatial join to find which Value corresponds to each point
-pmp_meta_sf <- pmp_meta_sf %>%
-  sf::st_join(maps1, join = sf::st_within) %>% # Join based on spatial location
-  filter(!is.na(region))
-
-# View the result
-pmp_meta_sf 
-```
-
-
-```{r}
-pmp_meta_zone <- pmp_meta_sf %>%
+pmp_meta_zone <- pmp_meta %>%
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%  # Convert to sf
+  sf::st_join(maps1, join = sf::st_within) %>%  # Spatial join
+  filter(!is.na(region)) %>%
   mutate(
-    longitude = sf::st_coordinates(.)[, 1],   # Extract longitude
-    latitude = sf::st_coordinates(.)[, 2]     # Extract latitude
+    longitude = sf::st_coordinates(.)[, 1],  # Extract lon
+    latitude = sf::st_coordinates(.)[, 2]    # Extract lat
   ) %>%
   sf::st_drop_geometry()
-```
 
 
 
-```{r}
 ggplot2::ggplot() + 
   ggplot2::geom_sf(data = latam_polygon) + 
   geom_point(data=pmp_meta_zone, aes(x=longitude, y=latitude, fill=region, colour=region)) +
@@ -118,58 +96,51 @@ ggplot2::ggplot() +
 
 
 
-
-Chunk que hay que correr solo si queremos el plot
+Only to run if we want the plot of the entire HFP map for latam
 ```{r}
-raster_df <- as.data.frame(footprint_raster, xy = TRUE) |>
-  filter(!is.na(HFP2009_reprojected))
+#raster_df <- as.data.frame(footprint_raster, xy = TRUE) |> filter(!is.na(HFP2009_reprojected))
 
+#plot0.2 <- ggplot() +
+#  ggplot2::geom_sf(data = latam_polygon,fill="gray95") +
+ # geom_tile(data = raster_df, aes(x = x, y = y, fill = HFP2009_reprojected)) +
+ # scico::scale_fill_scico(palette = "lipari") +
+#  labs(x = NULL, y = NULL, fill  = "HFP") +
+ # scale_x_continuous(expand = c(0,0)) +
+ # scale_y_continuous(expand = c(0,0)) +
+ # ggspatial::annotation_north_arrow(location = "tr", which_north = "true",height = unit(4.8, "mm"), width = unit(4.8, "mm"), pad_x = unit(2, "mm"), #pad_y = unit(2, "mm"),style = ggspatial::north_arrow_nautical(fill = c("grey40", "white"),line_col = "grey20", text_family = "Book Antiqua",text_size = 5.5)) +  # "Mongolian Baiti"
+ # annotate(geom = "text", x = -98.3, y = 2, label = "Pacific", 
+    #fontface = "italic", color = "gray25", size = 2) +
+  #annotate(geom = "text", x = -98.4, y = 0, label = "Ocean", 
+    #fontface = "italic", color = "gray25", size = 2) +
+  #theme(panel.background = element_rect(fill="white",color="transparent"),
+       # panel.border = element_rect(fill="transparent",color="black"),
+       # panel.grid = element_blank(),
+       # axis.title.x = element_text(size=7.5,color = "black"),
+       # axis.title.y = element_text(size=7.5, angle=90),
+       # axis.text.x = element_text(size=7.5),
+       # axis.text.y = element_text(size=7.5),
+       ## axis.ticks = element_blank(),
+       # legend.key.size = unit(0.20,"cm"),
+       # legend.text.align = 0,
+       # legend.text=element_text(size=6.5),
+       # legend.title.align = 0.5,
+       # legend.title = element_text(size = 6.5),
+       # legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.15,l=0.08),
+       # legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+       # legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
+       # legend.position = c(0.1,0.2))
 
-
-plot0.2 <- ggplot() +
-  ggplot2::geom_sf(data = latam_polygon,fill="gray95") +
-  geom_tile(data = raster_df, aes(x = x, y = y, fill = HFP2009_reprojected)) +
-  #scale_fill_viridis_c(name = "Value", option = "plasma") +
-  #jcolors::scale_fill_jcolors_contin(palette = "pal12", bias = 0.8) +
-  scico::scale_fill_scico(palette = "lipari") +
-  labs(x = NULL,
-       y = NULL,
-       fill  = "HFP") +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  ggspatial::annotation_north_arrow(location = "tr", which_north = "true",height = unit(4.8, "mm"), width = unit(4.8, "mm"), pad_x = unit(2, "mm"), pad_y = unit(2, "mm"),style = ggspatial::north_arrow_nautical(fill = c("grey40", "white"),line_col = "grey20", text_family = "Book Antiqua",text_size = 5.5)) +  # "Mongolian Baiti"
-  annotate(geom = "text", x = -98.3, y = 2, label = "Pacific", 
-    fontface = "italic", color = "gray25", size = 2) +
-  annotate(geom = "text", x = -98.4, y = 0, label = "Ocean", 
-    fontface = "italic", color = "gray25", size = 2) +
-  theme(panel.background = element_rect(fill="white",color="transparent"),
-        panel.border = element_rect(fill="transparent",color="black"),
-        panel.grid = element_blank(),
-        axis.title.x = element_text(size=7.5,color = "black"),
-        axis.title.y = element_text(size=7.5, angle=90),
-        axis.text.x = element_text(size=7.5),
-        axis.text.y = element_text(size=7.5),
-       # axis.ticks = element_blank(),
-        legend.key.size = unit(0.20,"cm"),
-        legend.text.align = 0,
-        legend.text=element_text(size=6.5),
-        legend.title.align = 0.5,
-        legend.title = element_text(size = 6.5),
-        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.15,l=0.08),
-        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
-        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25),
-        legend.position = c(0.1,0.2))
-
-plot0.2
+#plot0.2
 ```
 
 
 ```{r}
-ggsave(plot = plot0.2, "G:/My Drive/Postdoc UNAM docs/Renovación posdoc DGAPA/mapa_HFP_lipari.jpg", units = "cm", height = 10, width = 10)
+#ggsave(plot = plot0.2, "G:/My Drive/Postdoc UNAM docs/Renovación posdoc DGAPA/mapa_HFP_lipari.jpg", units = "cm", height = 10, width = 10)
 ```
 
 
-Extracting raster values within each polygon
+**Note** the output of this chunk was saved as an .rds object becasue it takes time to run
+Extracting HFP raster values within each EPA regions polygons
 ```{r}
 maps1 <- st_transform(maps1, crs = st_crs(footprint_raster)) # Ensure that the CRS of maps1 matches the CRS of the raster
 
@@ -197,84 +168,71 @@ pixel_data_split <- split(do.call(rbind, pixel_data), do.call(c, lapply(pixel_da
 ```
 
 
-
 ```{r}
 saveRDS(pixel_data_split, "Output_data_human_footprint/pixel_data_split.rds")
 ```
 
 
-
 ```{r}
 pixel_data_split <- readRDS("Output_data_human_footprint/pixel_data_split.rds")
-```
 
 
-
-```{r}
 # Example: To access the dataframe for Value 21
 example <- pixel_data_split[["12"]]
 example |>
   ggplot(aes(x=lon, y=lat, fill=value, colour=value)) +
   geom_tile() +
   theme()
-
-example <- pixel_data_split[["15"]]
-example |>
-  ggplot(aes(x=lon, y=lat, fill=value, colour=value)) +
-  geom_tile() +
-  theme()
 ```
 
 
 
-Plot all zones
+Only to run if we want to plot facet of the HFP for individual EPA regions
 ```{r}
 # Convert raster values to a dataframe with lat-lon and raster values
-raster_df <- as.data.frame(footprint_raster, xy = TRUE, na.rm = TRUE)
-colnames(raster_df) <- c("lon", "lat", "value")
+#raster_df <- as.data.frame(footprint_raster, xy = TRUE, na.rm = TRUE)
+#colnames(raster_df) <- c("lon", "lat", "value")
 
 # Create a data frame for each region from the pixel_data_split list
 # Combine all the dataframes into one (with lat, lon, value, and region)
-pixel_data_combined <- do.call(rbind, lapply(names(pixel_data_split), function(value) {
-  df <- pixel_data_split[[value]]
-  df$region <- value
-  return(df)
-}))
+#pixel_data_combined <- do.call(rbind, lapply(names(pixel_data_split), function(value) {
+  #df <- pixel_data_split[[value]]
+  #df$region <- value
+  #return(df)
+#}))
 
 # Merge the raster data with the latam_polygon data
-latam_polygon <- st_transform(latam_polygon, crs = st_crs(footprint_raster))
+#latam_polygon <- st_transform(latam_polygon, crs = st_crs(footprint_raster))
 
 # Plot using ggplot2
-plot1 <- ggplot() +
-  #geom_sf(data = latam_polygon, fill = "gray95", color = "black") +  # Plot the polygon
-  geom_raster(data = pixel_data_combined, aes(x = lon, y = lat, fill = value)) +  # Plot the raster values
-  scico::scale_fill_scico(palette = "lipari") +
- # scale_fill_viridis_c() +  # Use a color scale for the raster values
-  facet_wrap(~ region, ncol=1, scales = "free") +  # Create a facet for each 'Value'
-  labs(fill = "Pressure", x=NULL, y=NULL) +
-  theme(panel.background = element_rect(fill="white",color="transparent"),
-        panel.border = element_rect(fill="transparent",color="black"),
-        panel.grid = element_blank(),
-        axis.text.x = element_text(size=7.5),
-        axis.text.y = element_text(size=7.5),
-        strip.text = element_text(size = 7.5, hjust = 0, vjust = 0),
-        strip.background = element_rect(fill="transparent", colour="transparent"),
-        legend.key.size = unit(0.20,"cm"),
-        legend.text.align = 0,
-        legend.text=element_text(size=6.5),
-        legend.title.align = 0.5,
-        legend.title = element_text(size = 6.5),
-        legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.15,l=0.08),
-        legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
-        legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25))
+#plot1 <- ggplot() +
+  #geom_raster(data = pixel_data_combined, aes(x = lon, y = lat, fill = value)) +  # Plot the raster values
+  #scico::scale_fill_scico(palette = "lipari") +
+  #facet_wrap(~ region, ncol=1, scales = "free") +  # Create a facet for each 'Value'
+  #labs(fill = "Pressure", x=NULL, y=NULL) +
+  #theme(panel.background = element_rect(fill="white",color="transparent"),
+       # panel.border = element_rect(fill="transparent",color="black"),
+        #panel.grid = element_blank(),
+       # axis.text.x = element_text(size=7.5),
+       # axis.text.y = element_text(size=7.5),
+       # strip.text = element_text(size = 7.5, hjust = 0, vjust = 0),
+       # strip.background = element_rect(fill="transparent", colour="transparent"),
+       # legend.key.size = unit(0.20,"cm"),
+       # legend.text.align = 0,
+       # legend.text=element_text(size=6.5),
+       # legend.title.align = 0.5,
+       # legend.title = element_text(size = 6.5),
+       # legend.margin = margin(unit = "cm", t=0.05,r=0.08,b=0.15,l=0.08),
+       # legend.box.background = element_rect(fill=alpha('white', 0.2),color="gray30",size = 0.15,),
+       # legend.background = element_rect(fill=alpha('white', 0.45),color="gray30",size = 0.25))
 
-plot1
+#plot1
 ```
 
 
 
 ```{r}
-ggsave(plot = plot1, "G:/My Drive/Postdoc UNAM docs/Renovación posdoc DGAPA/plot_zones.pdf", units = "cm", width = 7, height=26)
+#ggsave(plot = plot1, "G:/My Drive/Postdoc UNAM docs/Renovación posdoc DGAPA/plot_zones.pdf", units = "cm", width = 7, height=26)
 ```
 
 
@@ -337,7 +295,7 @@ medians_df
 
 ```{r}
 pmp_usage_meta <- pmp_meta_zone |>
- # left_join(pmp_ecological) |>
+  left_join(pmp_ecological) |>
   left_join(medians_df) |>
   rename(median_human_footprint = Median_Value) |>
   mutate(class_exact = case_when(human_footprint_exact < median_human_footprint ~ "NO", TRUE ~ "YES"),
